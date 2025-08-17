@@ -1,81 +1,122 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
-import { api, makeFileUrl } from './api/client'
-import './index.css'
+import { useEffect, useMemo, useRef, useState } from "react";
+import { api, makeFileUrl } from "./api/client";
+import "./index.css";
 
 const humanBytes = (n = 0) => {
-  const u = ['B','KB','MB','GB','TB']; let i=0, v=n
-  while (v >= 1024 && i < u.length - 1) { v/=1024; i++ }
-  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`
-}
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0,
+    v = n;
+  while (v >= 1024 && i < u.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
+};
 const fdate = (iso) => {
-  try { return new Date(iso).toLocaleString() } catch { return iso }
-}
+  try {
+    return new Date(iso).toLocaleString();
+  } catch {
+    return iso;
+  }
+};
 
 export default function App() {
-  const [items, setItems] = useState([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [file, setFile] = useState(null)
-  const [progress, setProgress] = useState(0)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const dzRef = useRef(null)
+  const [items, setItems] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [file, setFile] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const dzRef = useRef(null);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / pageSize)),
     [total, pageSize]
-  )
+  );
 
   async function load() {
-    setLoading(true); setError('')
+    setLoading(true);
+    setError("");
     try {
-      const res = await api.get('/api/videos', { params: { page, pageSize } })
-      setItems(res.data.items || []); setTotal(res.data.total || 0)
+      const res = await api.get("/api/videos", { params: { page, pageSize } });
+      setItems(res.data.items || []);
+      setTotal(res.data.total || 0);
     } catch (e) {
-      console.error(e); setError('Falha ao carregar lista.')
-    } finally { setLoading(false) }
+      console.error(e);
+      setError("Falha ao carregar lista.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  useEffect(() => { load() }, [page, pageSize])
+  useEffect(() => {
+    load();
+  }, [page, pageSize]);
 
   useEffect(() => {
-    const dz = dzRef.current; if (!dz) return
-    const stop = (e) => { e.preventDefault(); e.stopPropagation() }
-    const over = (e) => { stop(e); dz.classList.add('ring-2','ring-brand-500/50') }
-    const leave = (e) => { stop(e); dz.classList.remove('ring-2','ring-brand-500/50') }
+    const dz = dzRef.current;
+    if (!dz) return;
+    const stop = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const over = (e) => {
+      stop(e);
+      dz.classList.add("ring-2", "ring-brand-500/50");
+    };
+    const leave = (e) => {
+      stop(e);
+      dz.classList.remove("ring-2", "ring-brand-500/50");
+    };
     const drop = (e) => {
-      stop(e); dz.classList.remove('ring-2','ring-brand-500/50')
-      const f = e.dataTransfer?.files?.[0]; if (f) setFile(f)
-    }
-    dz.addEventListener('dragover', over)
-    dz.addEventListener('dragleave', leave)
-    dz.addEventListener('drop', drop)
+      stop(e);
+      dz.classList.remove("ring-2", "ring-brand-500/50");
+      const f = e.dataTransfer?.files?.[0];
+      if (f) setFile(f);
+    };
+    dz.addEventListener("dragover", over);
+    dz.addEventListener("dragleave", leave);
+    dz.addEventListener("drop", drop);
     return () => {
-      dz.removeEventListener('dragover', over)
-      dz.removeEventListener('dragleave', leave)
-      dz.removeEventListener('drop', drop)
-    }
-  }, [])
+      dz.removeEventListener("dragover", over);
+      dz.removeEventListener("dragleave", leave);
+      dz.removeEventListener("drop", drop);
+    };
+  }, []);
 
   async function handleUpload(e) {
-    e.preventDefault()
-    if (!file) return
-    setError(''); setProgress(0)
+    e.preventDefault();
+    if (!file) return;
+    setError("");
+    setProgress(0);
+
     try {
-      const form = new FormData()
-      form.append('file', file)
-      const res = await api.post('/api/videos', form, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-        onUploadProgress: (ev) => {
-          if (ev.total) setProgress(Math.round((ev.loaded * 100) / ev.total))
-        },
-      })
-      setFile(null); setProgress(0)
-      setItems((prev) => [res.data, ...prev]); setTotal((t) => t + 1)
+      const presign = await api.post("/api/videos/presign", {
+        filename: file.name,
+        contentType: file.type || "video/mp4",
+      });
+      const { id, uploadUrl } = presign.data;
+
+      await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "video/mp4" },
+        body: file,
+      });
+
+      const res = await api.post("/api/videos/complete", {
+        id,
+        size: file.size,
+      });
+
+      setItems((prev) => [res.data, ...prev]);
+      setTotal((t) => t + 1);
+      setFile(null);
+      setProgress(0);
     } catch (e) {
-      console.error(e)
-      setError(e?.response?.data?.message || 'Falha no upload. Verifique o tipo/tamanho do arquivo.')
+      console.error(e);
+      setError("Falha no upload via URL pré-assinada.");
     }
   }
 
@@ -90,7 +131,9 @@ export default function App() {
             </div>
             <div className="text-xl font-bold tracking-tight">
               <span className="text-slate-200">trakto</span>
-              <span className="ml-2 text-slate-400 text-sm">video processor</span>
+              <span className="ml-2 text-slate-400 text-sm">
+                video processor
+              </span>
             </div>
           </div>
           <a
@@ -109,10 +152,12 @@ export default function App() {
         {/* Upload Card */}
         <section className="card p-6 md:p-8">
           <h1 className="text-2xl md:text-[28px] font-bold mb-2">
-            Simplifique seu fluxo. <span className="text-brand-300">Escalone</span> com design.
+            Simplifique seu fluxo.{" "}
+            <span className="text-brand-300">Escalone</span> com design.
           </h1>
           <p className="text-slate-400 mb-6">
-            Envie um vídeo para armazenar o original e gerar automaticamente a versão <i>low-res</i>.
+            Envie um vídeo para armazenar o original e gerar automaticamente a
+            versão <i>low-res</i>.
           </p>
 
           <form onSubmit={handleUpload} className="space-y-4">
@@ -123,9 +168,9 @@ export default function App() {
               aria-label="Área para arrastar e soltar vídeo"
               className="rounded-2xl border border-dashed border-white/15 bg-white/5 p-6 md:p-8 grid place-items-center text-center select-none focus:outline-none"
               onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  document.getElementById('file-input')?.click()
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  document.getElementById("file-input")?.click();
                 }
               }}
             >
@@ -143,21 +188,22 @@ export default function App() {
                     clique para escolher
                   </label>
                 </p>
-                <p className="text-xs text-slate-400">Formatos: mp4, mov, mkv, avi · até 200MB</p>
+                <p className="text-xs text-slate-400">
+                  Formatos: mp4, mov, mkv, avi · até 200MB
+                </p>
               </div>
             </div>
 
             {file && (
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
                 <div className="truncate text-sm text-slate-300">
-                  <span className="text-slate-400">Arquivo:</span>{' '}
-                  <span className="font-medium">{file.name}</span>{' '}
-                  <span className="text-slate-500">({humanBytes(file.size)})</span>
+                  <span className="text-slate-400">Arquivo:</span>{" "}
+                  <span className="font-medium">{file.name}</span>{" "}
+                  <span className="text-slate-500">
+                    ({humanBytes(file.size)})
+                  </span>
                 </div>
-                <button
-                  type="submit"
-                  className="btn-primary w-full md:w-auto"
-                >
+                <button type="submit" className="btn-primary w-full md:w-auto">
                   Enviar
                 </button>
               </div>
@@ -171,7 +217,9 @@ export default function App() {
                     style={{ width: `${progress}%` }}
                   />
                 </div>
-                <div className="mt-1 text-right text-xs text-slate-400">{progress}%</div>
+                <div className="mt-1 text-right text-xs text-slate-400">
+                  {progress}%
+                </div>
               </div>
             )}
 
@@ -192,29 +240,42 @@ export default function App() {
             </div>
             <div className="flex items-center gap-3">
               <label className="text-sm text-slate-300">
-                Itens:{' '}
+                Itens:{" "}
                 <select
                   className="bg-white/5 border border-white/10 rounded-lg px-2 py-1"
                   value={pageSize}
-                  onChange={(e) => { setPage(1); setPageSize(+e.target.value) }}
+                  onChange={(e) => {
+                    setPage(1);
+                    setPageSize(+e.target.value);
+                  }}
                 >
-                  {[5,10,20,50].map(n => <option key={n} value={n}>{n}</option>)}
+                  {[5, 10, 20, 50].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
                 </select>
               </label>
               <div className="flex items-center gap-2">
                 <button
                   className="rounded-lg px-2 py-1 bg-white/5 border border-white/10 disabled:opacity-40"
-                  onClick={() => setPage(p => Math.max(1, p-1))}
-                  disabled={page<=1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page <= 1}
                   type="button"
-                >◀</button>
-                <span className="text-sm text-slate-300">{page}/{totalPages}</span>
+                >
+                  ◀
+                </button>
+                <span className="text-sm text-slate-300">
+                  {page}/{totalPages}
+                </span>
                 <button
                   className="rounded-lg px-2 py-1 bg-white/5 border border-white/10 disabled:opacity-40"
-                  onClick={() => setPage(p => Math.min(totalPages, p+1))}
-                  disabled={page>=totalPages}
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages}
                   type="button"
-                >▶</button>
+                >
+                  ▶
+                </button>
               </div>
             </div>
           </div>
@@ -226,48 +287,79 @@ export default function App() {
                   <th className="py-3 pr-4 text-left font-semibold">Data</th>
                   <th className="py-3 pr-4 text-left font-semibold">Status</th>
                   <th className="py-3 pr-4 text-left font-semibold">Tamanho</th>
-                  <th className="py-3 pr-4 text-left font-semibold">Original</th>
+                  <th className="py-3 pr-4 text-left font-semibold">
+                    Original
+                  </th>
                   <th className="py-3 pr-0  text-left font-semibold">Low</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
-                  <tr><td className="py-6 text-slate-400" colSpan={5}>Carregando…</td></tr>
-                ) : items.length === 0 ? (
-                  <tr><td className="py-6 text-slate-400" colSpan={5}>Nenhum vídeo ainda.</td></tr>
-                ) : items.map(v => (
-                  <tr key={v.id} className="border-b border-white/10">
-                    <td className="py-3 pr-4">{fdate(v.createdAt)}</td>
-                    <td className="py-3 pr-4">
-                      <span className={`badge ${
-                        v.status === 'done' ? 'badge-done' :
-                        v.status === 'error' ? 'badge-error' : 'badge-pending'
-                      }`}>{v.status}</span>
-                    </td>
-                    <td className="py-3 pr-4">{humanBytes(v.size)}</td>
-                    <td className="py-3 pr-4">
-                      {v.originalUrl ? (
-                        <a
-                          className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
-                          href={makeFileUrl(v.originalUrl)} target="_blank" rel="noreferrer"
-                        >Baixar</a>
-                      ) : <span className="text-slate-500">—</span>}
-                    </td>
-                    <td className="py-3 pr-0">
-                      {v.lowUrl ? (
-                        <a
-                          className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
-                          href={makeFileUrl(v.lowUrl)} target="_blank" rel="noreferrer"
-                        >Baixar</a>
-                      ) : <span className="text-slate-500">—</span>}
+                  <tr>
+                    <td className="py-6 text-slate-400" colSpan={5}>
+                      Carregando…
                     </td>
                   </tr>
-                ))}
+                ) : items.length === 0 ? (
+                  <tr>
+                    <td className="py-6 text-slate-400" colSpan={5}>
+                      Nenhum vídeo ainda.
+                    </td>
+                  </tr>
+                ) : (
+                  items.map((v) => (
+                    <tr key={v.id} className="border-b border-white/10">
+                      <td className="py-3 pr-4">{fdate(v.createdAt)}</td>
+                      <td className="py-3 pr-4">
+                        <span
+                          className={`badge ${
+                            v.status === "done"
+                              ? "badge-done"
+                              : v.status === "error"
+                              ? "badge-error"
+                              : "badge-pending"
+                          }`}
+                        >
+                          {v.status}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4">{humanBytes(v.size)}</td>
+                      <td className="py-3 pr-4">
+                        {v.originalUrl ? (
+                          <a
+                            className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
+                            href={makeFileUrl(v.originalUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Baixar
+                          </a>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-0">
+                        {v.lowUrl ? (
+                          <a
+                            className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
+                            href={makeFileUrl(v.lowUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Baixar
+                          </a>
+                        ) : (
+                          <span className="text-slate-500">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
         </section>
       </main>
     </div>
-  )
+  );
 }

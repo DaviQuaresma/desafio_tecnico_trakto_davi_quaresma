@@ -5,7 +5,18 @@
   "author": "",
   "private": true,
   "license": "UNLICENSED",
-  "scripts": {
+"scripts": {
+    "gcp:init:sh": "bash scripts/gcp-init.sh",
+    "gcp:init:ps": "powershell -ExecutionPolicy Bypass -File scripts/gcp-init.ps1",
+
+    "gcs:cors:set": "gcloud storage buckets update gs://trakto-videos-469221 --cors-file=scripts/cors.json",
+
+    "gcs:smoke:cp": "echo teste> test.txt && gcloud storage cp test.txt gs://trakto-videos-469221/tests/test.txt",
+    "gcs:smoke:ls": "gcloud storage ls gs://trakto-videos-469221/tests/",
+
+    "gcs:upload": "node gcs.mjs upload ./test.txt tests/test.txt",
+    "gcs:url": "node gcs.mjs url tests/test.txt",
+
     "build": "nest build",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "start": "nest start",
@@ -21,10 +32,13 @@
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@google-cloud/storage": "^7.16.0",
     "@nestjs/common": "^11.0.1",
+    "@nestjs/config": "^4.0.2",
     "@nestjs/core": "^11.0.1",
     "@nestjs/platform-express": "^11.1.6",
     "@nestjs/serve-static": "^5.0.3",
+    "dotenv": "^17.2.1",
     "fluent-ffmpeg": "^2.1.3",
     "multer": "^2.0.2",
     "reflect-metadata": "^0.2.2",

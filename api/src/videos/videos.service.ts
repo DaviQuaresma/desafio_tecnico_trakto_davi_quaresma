@@ -1,9 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { mkdirSync, copyFileSync, existsSync } from 'fs';
-import { join, extname } from 'path';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
+import { existsSync, unlinkSync } from 'fs';
+import { extname } from 'path';
+import { randomUUID } from 'crypto';
 import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
-import { randomUUID } from 'crypto';
+import { GcsService } from '../storage/gcs.service';
+import { ConfigService } from '@nestjs/config';
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -13,40 +19,43 @@ export interface VideoRecord {
   id: string;
   originalKey: string;
   lowKey: string | null;
-  originalUrl: string;
-  lowUrl: string | null;
+  originalUrl: string | null; // signed read URL
+  lowUrl: string | null; // signed read URL
   createdAt: string;
   status: Status;
   error?: string;
   originalFilename: string;
   mime: string;
-  size: number;
+  size: number | null;
 }
 
 @Injectable()
 export class VideosService {
   private records: VideoRecord[] = [];
+  private readonly signedTtlSec: number;
 
-  private readonly storageRoot = join(process.cwd(), 'storage');
-  private readonly originalDir = join(this.storageRoot, 'original');
-  private readonly lowDir = join(this.storageRoot, 'low');
-
-  constructor() {
-    [this.storageRoot, this.originalDir, this.lowDir].forEach((dir) => {
-      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    });
+  constructor(
+    private readonly gcs: GcsService,
+    cfg: ConfigService,
+  ) {
+    this.signedTtlSec = Number(cfg.get('GCS_SIGNED_URL_EXPIRES') ?? 3600);
   }
 
   list(page = 1, pageSize = 10) {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
+    // reemite URLs assinadas “frescas”
     const items = this.records.slice().reverse().slice(start, end);
-    return {
-      page,
-      pageSize,
-      total: this.records.length,
-      items,
-    };
+    return { page, pageSize, total: this.records.length, items };
+  }
+
+  async refreshSignedUrls(rec: VideoRecord) {
+    rec.originalUrl = rec.originalKey
+      ? await this.gcs.getReadSignedUrl(rec.originalKey, this.signedTtlSec)
+      : null;
+    rec.lowUrl = rec.lowKey
+      ? await this.gcs.getReadSignedUrl(rec.lowKey, this.signedTtlSec)
+      : null;
   }
 
   getOne(id: string) {
@@ -55,64 +64,178 @@ export class VideosService {
     return rec;
   }
 
+  // ========= FLUXO A (DEV): multipart direto para API (sobe para GCS) =========
   async processUpload(file: Express.Multer.File) {
-    // 1) "Salvar" o original no storage (mock: copiar do tmp/uploads para storage/original)
     const id = file.filename.replace(extname(file.filename), '');
-    const ext = extname(file.originalname).toLowerCase() || extname(file.filename);
-    const originalKey = `original/${file.filename}`;
+    const ext =
+      extname(file.originalname).toLowerCase() || extname(file.filename);
+    const originalKey = `original/${id}${ext}`;
     const lowKey = `low/${id}_low${ext}`;
 
-    const srcPath = file.path; // tmp/uploads/<uuid>.<ext>
-    const dstOriginal = join(this.storageRoot, originalKey);
-    const dstLow = join(this.storageRoot, lowKey);
+    // sobe arquivo temporário do multer -> GCS
+    await this.gcs.uploadLocalFile(file.path, originalKey, file.mimetype);
+    // apaga tmp local (opcional)
+    if (existsSync(file.path)) unlinkSync(file.path);
 
-    copyFileSync(srcPath, dstOriginal);
-
-    // 2) Gerar versão low com ffmpeg (1280px máx na largura, preservando proporção)
-    let status: Status = 'pending';
+    // cria registro
     const rec: VideoRecord = {
       id,
       originalKey,
       lowKey: null,
-      originalUrl: `/files/${originalKey}`,
+      originalUrl: null,
       lowUrl: null,
       createdAt: new Date().toISOString(),
-      status,
+      status: 'pending',
       originalFilename: file.originalname,
       mime: file.mimetype,
       size: file.size,
     };
     this.records.push(rec);
 
+    // transcodifica
     try {
-      await this.transcodeLow(dstOriginal, dstLow);
+      await this.transcodeFromGcs(originalKey, lowKey, ext);
       rec.lowKey = lowKey;
-      rec.lowUrl = `/files/${lowKey}`;
+      rec.status = 'done';
+      await this.refreshSignedUrls(rec);
+    } catch (e: any) {
+      rec.status = 'error';
+      rec.error = e?.message ?? String(e);
+      await this.refreshSignedUrls(rec);
+    }
+
+    await this.refreshSignedUrls(rec);
+    return rec;
+  }
+
+  // ========= FLUXO B (OFICIAL): URL pré-assinada + confirmação =========
+
+  async presignOriginal(filename: string, contentType: string) {
+    if (!contentType?.startsWith('video/')) {
+      throw new BadRequestException('contentType inválido');
+    }
+    const id = randomUUID();
+    const ext = extname(filename) || '.mp4';
+    const originalKey = `original/${id}${ext}`;
+
+    const uploadUrl = await this.gcs.getWriteSignedUrl(
+      originalKey,
+      contentType,
+    );
+
+    // cria registro pendente (ainda sem tamanho)
+    const rec: VideoRecord = {
+      id,
+      originalKey,
+      lowKey: null,
+      originalUrl: null,
+      lowUrl: null,
+      createdAt: new Date().toISOString(),
+      status: 'pending',
+      originalFilename: filename,
+      mime: contentType,
+      size: null,
+    };
+    this.records.push(rec);
+
+    return { id, uploadUrl, originalKey };
+  }
+
+  async completeUpload(id: string, size?: number) {
+    const rec = this.records.find((r) => r.id === id);
+    if (!rec) throw new NotFoundException('id inválido');
+
+    const exists = await this.gcs.exists(rec.originalKey);
+    if (!exists)
+      throw new BadRequestException('Objeto original não encontrado');
+
+    // lê metadados reais do GCS
+    const meta = await this.gcs.getMetadata(rec.originalKey);
+    rec.size = size ?? Number(meta.size ?? 0);
+    rec.mime = meta.contentType ?? rec.mime;
+
+    const ext = extname(rec.originalKey) || '.mp4';
+    const lowKey = `low/${rec.id}_low${ext}`;
+
+    try {
+      await this.transcodeFromGcs(rec.originalKey, lowKey, ext);
+      rec.lowKey = lowKey;
       rec.status = 'done';
     } catch (e: any) {
       rec.status = 'error';
       rec.error = e?.message ?? String(e);
     }
-
+    await this.refreshSignedUrls(rec);
     return rec;
   }
 
-  private transcodeLow(input: string, output: string): Promise<void> {
-    return new Promise((resolve, reject) => {
-      ffmpeg(input)
-        // 1280px de largura máx; altura automática (-2 mantém múltiplo de 2)
+  // ========= util: baixa do GCS -> tmp, ffmpeg -> tmp, sobe low -> GCS =========
+  private async transcodeFromGcs(
+    originalKey: string,
+    lowKey: string,
+    ext: string,
+  ) {
+    const localSrc = await this.gcs.downloadToTmp(originalKey, ext);
+    const localDst = localSrc.replace(ext, `_low${ext}`);
+
+    // confere tamanho e "ftyp" (MP4)
+    const { statSync, readFileSync, existsSync, unlinkSync } = await import(
+      'fs'
+    );
+    const st = statSync(localSrc);
+    if (!st.size) throw new Error('Arquivo baixado do GCS está vazio (size=0)');
+
+    const header = readFileSync(localSrc).slice(0, 4096);
+    // MP4 costuma conter 'ftyp' perto do início
+    if (!header.toString('utf8').includes('ftyp')) {
+      // não bloqueia, mas ajuda a diagnosticar
+      // throw new Error('Cabeçalho inválido: não parece MP4');
+    }
+
+    // ffprobe: precisa existir pelo menos um stream de vídeo
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg.ffprobe(localSrc, (err, info) => {
+        if (err) return reject(new Error(`ffprobe falhou: ${err.message}`));
+        const hasVideo = info.streams?.some(
+          (s: any) => s.codec_type === 'video',
+        );
+        if (!hasVideo)
+          return reject(new Error('Arquivo sem stream de vídeo válido'));
+        resolve();
+      });
+    });
+
+    await new Promise<void>((resolve, reject) => {
+      ffmpeg(localSrc)
         .outputOptions([
-          '-vf', 'scale=1280:-2',
-          '-c:v', 'libx264',
-          '-preset', 'veryfast',
-          '-crf', '28',
-          '-c:a', 'aac',
-          '-b:a', '96k',
-          '-movflags', '+faststart'
+          '-vf',
+          'scale=w=min(1280\\,iw):h=-2:flags=lanczos',
+          '-c:v',
+          'libx264',
+          '-pix_fmt',
+          'yuv420p',
+          '-preset',
+          'veryfast',
+          '-crf',
+          '28',
+          '-c:a',
+          'aac',
+          '-b:a',
+          '96k',
+          '-movflags',
+          '+faststart',
         ])
         .on('end', () => resolve())
-        .on('error', (err) => reject(err))
-        .save(output);
+        .on('error', (err) => reject(new Error(`ffmpeg: ${err.message}`)))
+        .save(localDst);
     });
+
+    await this.gcs.uploadLocalFile(localDst, lowKey, 'video/mp4');
+    try {
+      if (existsSync(localSrc)) unlinkSync(localSrc);
+    } catch {}
+    try {
+      if (existsSync(localDst)) unlinkSync(localDst);
+    } catch {}
   }
 }
