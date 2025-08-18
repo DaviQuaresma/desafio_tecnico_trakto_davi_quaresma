@@ -54,7 +54,7 @@ export default function App() {
 
   const [dl, setDl] = useState({});
 
-  async function handleDownload(v, type /* 'original' | 'low' */) {
+  async function handleDownload(v, type) {
     const key = `${v.id}:${type}`;
     setDl((s) => ({ ...s, [key]: 0 }));
     try {
