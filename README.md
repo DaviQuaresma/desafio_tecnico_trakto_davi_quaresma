@@ -189,13 +189,13 @@ Config (`web/src/api/client.ts`):
    O script irá:
    - Garantir que o bucket existe.
    - Garantir que a Service Account existe e tem permissão.
-   - Gerar uma nova chave JSON em `C:\keys\trakto-uploader.json`.
+   - Gerar uma nova chave JSON em `..\secrets\gcp_sa.json`.
    - Configurar CORS no bucket.
    - Exibir as variáveis para adicionar ao seu `.env`.
 
 4. **Atualize o arquivo `.env` da API:**
    ```
-   GOOGLE_APPLICATION_CREDENTIALS=C:\keys\trakto-uploader.json
+   GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcp_sa.json
    GCS_BUCKET=trakto-videos-469221
    GCS_SIGNED_URL_EXPIRES=3600
    ```

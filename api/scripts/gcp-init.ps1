@@ -7,8 +7,8 @@ $REGION     = "southamerica-east1"
 $BUCKET     = "trakto-videos-469221"
 $SA_NAME    = "trakto-videos-uploader"
 $SA_EMAIL   = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
-$KEY_PATH   = "C:\keys\trakto-uploader.json"
-$CORS_FILE  = "../cors.json"
+$KEY_PATH   = "..\secrets\gcp_sa.json"
+$CORS_FILE  = "..\cors.json"
 # ====================
 
 # Verifica se está autenticado no gcloud

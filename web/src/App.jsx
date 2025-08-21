@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api/client";
 import "./index.css";
-import axios from "axios";
 
 const humanBytes = (n = 0) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -31,11 +30,34 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const dzRef = useRef(null);
+  const [realProgress, setRealProgress] = useState(0);
+  const [uploading, setUploading] = useState(false);
+  const progressInterval = useRef(null);
 
   const totalPages = useMemo(
     () => Math.max(1, Math.ceil(total / pageSize)),
     [total, pageSize]
   );
+
+  useEffect(() => {
+    if (!uploading) return;
+    if (progressInterval.current) clearInterval(progressInterval.current);
+
+    progressInterval.current = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= realProgress) return prev;
+        return Math.min(prev + 1, realProgress);
+      });
+    }, 240); // quanto maior, mais lento (ms)
+
+    return () => clearInterval(progressInterval.current);
+  }, [realProgress, uploading]);
+
+  useEffect(() => {
+    if (!uploading && progressInterval.current) {
+      clearInterval(progressInterval.current);
+    }
+  }, [uploading]);
 
   async function load() {
     setLoading(true);
@@ -58,15 +80,18 @@ export default function App() {
     const key = `${v.id}:${type}`;
     setDl((s) => ({ ...s, [key]: 0 }));
     try {
-      const res = await api.get(`/api/videos/${encodeURIComponent(v.id)}/download/${type}`, {
-        responseType: "blob",
-        onDownloadProgress: (ev) => {
-          if (ev.total) {
-            const pct = Math.round((ev.loaded * 100) / ev.total);
-            setDl((s) => ({ ...s, [key]: pct }));
-          }
-        },
-      });
+      const res = await api.get(
+        `/api/videos/${encodeURIComponent(v.id)}/download/${type}`,
+        {
+          responseType: "blob",
+          onDownloadProgress: (ev) => {
+            if (ev.total) {
+              const pct = Math.round((ev.loaded * 100) / ev.total);
+              setDl((s) => ({ ...s, [key]: pct }));
+            }
+          },
+        }
+      );
 
       const disp = res.headers["content-disposition"] || "";
       const m = /filename\*?=(?:UTF-8'')?"?([^\";]+)/i.exec(disp);
@@ -136,27 +161,41 @@ export default function App() {
     if (!file) return;
     setError("");
     setProgress(0);
+    setRealProgress(0);
+    setUploading(true);
 
     try {
       const formData = new FormData();
       formData.append("file", file);
 
-      const res = await api.post("/api/videos", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
-        onUploadProgress: (ev) => {
-          const total = ev.total ?? file.size ?? 1;
-          const pct = Math.round((ev.loaded * 100) / total);
-          setProgress(pct);
-        },
-      });
-
-      setItems((prev) => [res.data, ...prev]);
-      setTotal((t) => t + 1);
-      setFile(null);
-      setProgress(0);
+      await api
+        .post("/api/videos", formData, {
+          headers: { "Content-Type": "multipart/form-data" },
+          onUploadProgress: (ev) => {
+            const total = ev.total ?? file.size ?? 1;
+            let pct = Math.round((ev.loaded * 100) / total);
+            if (pct >= 100) pct = 99;
+            setRealProgress(pct);
+          },
+        })
+        .then((res) => {
+          setRealProgress(100);
+          setProgress(100);
+          setItems((prev) => [res.data, ...prev]);
+          setTotal((t) => t + 1);
+          setFile(null);
+          setTimeout(() => {
+            setProgress(0);
+            setRealProgress(0);
+            setUploading(false);
+          }, 800);
+        });
     } catch (e) {
       console.error(e);
       setError("Falha no upload.");
+      setProgress(0);
+      setRealProgress(0);
+      setUploading(false);
     }
   }
 
@@ -258,7 +297,9 @@ export default function App() {
                   />
                 </div>
                 <div className="mt-1 text-right text-xs text-slate-400">
-                  {progress}%
+                  {progress < 100
+                    ? `${progress}%`
+                    : "Enviando vídeo para o histórico..."}
                 </div>
               </div>
             )}
