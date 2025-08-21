@@ -4,3 +4,4 @@ storage/
 tmp/
 .env
 # secrets/
+gcp_sa.json
