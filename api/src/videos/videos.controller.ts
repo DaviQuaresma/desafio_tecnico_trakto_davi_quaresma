@@ -7,6 +7,8 @@ import {
   Body,
   UseInterceptors,
   UploadedFile,
+  ParseFilePipe,
+  MaxFileSizeValidator,
   BadRequestException,
   Res,
   NotFoundException,
@@ -15,7 +17,8 @@ import { VideosService } from './videos.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { basename, extname } from 'path';
-import { randomUUID } from 'crypto';
+import { randomInt, randomUUID } from 'crypto';
+import { mkdirSync } from 'fs';
 import type { Response } from 'express';
 
 @Controller('/videos')
@@ -56,15 +59,13 @@ export class VideosController {
     FileInterceptor('file', {
       storage: diskStorage({
         destination: './tmp',
-        filename: (_req, file, cb) => {
-          const ext = extname(file.originalname) || '.mp4';
-          cb(null, `${randomUUID()}${ext}`);
-        },
+        filename: (_req, file, cb) =>
+          cb(null, `${randomInt(1000, 9999)}-${file.originalname}`),
       }),
     }),
   )
   async upload(@UploadedFile() file: Express.Multer.File) {
-    const video = await this.videos.processUpload(file);
+    const video = await this.videos.uploadAndRegister(file);
     return video;
   }
 
@@ -83,45 +84,33 @@ export class VideosController {
     which: 'original' | 'low',
     res: Response,
   ) {
-    try {
-      const rec = await this.videos.getOne(id);
-      if (!rec) {
-        console.error('Vídeo não encontrado:', id);
-        throw new NotFoundException('Arquivo não disponível');
-      }
-      const key = which === 'low' ? rec.lowKey : rec.originalKey;
-      if (!key) {
-        console.error('Key não encontrada:', which, rec);
-        throw new NotFoundException('Arquivo não disponível');
-      }
+    const rec = await this.videos.getOne(id);
+    const key = which === 'low' ? rec.lowKey : rec.originalKey;
+    if (!key) throw new NotFoundException('Arquivo não disponível');
 
-      const meta = await this.videos.getObjectMetadata(key);
-      const stream = this.videos.openReadStream(key);
+    const meta = await this.videos.getObjectMetadata(key);
+    const stream = this.videos.openReadStream(key);
 
-      const ct = meta?.contentType || 'application/octet-stream';
-      const size = Number(meta?.size || 0);
+    const ct = meta?.contentType || 'application/octet-stream';
+    const size = Number(meta?.size || 0);
 
-      const base = (rec.originalFilename || basename(key)).replace(
-        /\.[^.]+$/,
-        '',
-      );
-      const ext = extname(key) || '.mp4';
-      const name = which === 'low' ? `${base}_low${ext}` : `${base}${ext}`;
+    const base = (rec.originalFilename || basename(key)).replace(
+      /\.[^.]+$/,
+      '',
+    );
+    const ext = extname(key) || '.mp4';
+    const name = which === 'low' ? `${base}_low${ext}` : `${base}${ext}`;
 
-      res.setHeader('Content-Type', ct);
-      if (size) res.setHeader('Content-Length', String(size));
-      res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-      res.setHeader('Cache-Control', 'no-store');
+    res.setHeader('Content-Type', ct);
+    if (size) res.setHeader('Content-Length', String(size)); // necessário p/ progresso
+    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+    // (opcional) não cachear
+    res.setHeader('Cache-Control', 'no-store');
 
-      stream.on('error', () => {
-        if (!res.headersSent) res.status(500).end('stream error');
-        else res.end();
-      });
-      stream.pipe(res);
-    } catch (e) {
-      console.error('Erro no download:', e);
-      if (!res.headersSent) res.status(404).end('Arquivo não encontrado');
+    stream.on('error', () => {
+      if (!res.headersSent) res.status(500).end('stream error');
       else res.end();
-    }
+    });
+    stream.pipe(res);
   }
 }
