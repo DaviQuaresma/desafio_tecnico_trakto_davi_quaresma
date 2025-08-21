@@ -29,6 +29,16 @@ export interface VideoRecord {
   size: number | null;
 }
 
+function slugify(filename: string) {
+  return filename
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+}
+
 @Injectable()
 export class VideosService {
   private records: VideoRecord[] = [];
@@ -63,15 +73,19 @@ export class VideosService {
 
   async getOne(id: string) {
     const rec = this.records.find((r) => r.id === id);
-    if (!rec) throw new NotFoundException('Video not found');
+    if (!rec) {
+      console.error('Video não encontrado no array em memória:', id);
+      throw new NotFoundException('Video not found');
+    }
     await this.refreshSignedUrls(rec);
     return rec;
   }
 
   async processUpload(file: Express.Multer.File) {
-    const id = file.filename.replace(extname(file.filename), '');
-    const ext =
-      extname(file.originalname).toLowerCase() || extname(file.filename);
+    const ext = extname(file.originalname).toLowerCase() || '.mp4';
+    const base = slugify(file.originalname.replace(ext, ''));
+    const sufixo = Math.random().toString(36).slice(2, 8);
+    const id = `${base}-${sufixo}`;
     const originalKey = `original/${id}${ext}`;
     const lowKey = `low/${id}_low${ext}`;
 
