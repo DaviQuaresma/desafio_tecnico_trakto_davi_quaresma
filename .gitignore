@@ -3,4 +3,4 @@ dist/
 storage/
 tmp/
 .env
-# secrets/
+secrets/
