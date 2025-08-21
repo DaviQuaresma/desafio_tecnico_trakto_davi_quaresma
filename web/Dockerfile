@@ -6,10 +6,9 @@ RUN npm ci
 COPY . .
 RUN npm run build
 
-# --- production ---
-FROM node:20-alpine
-WORKDIR /app
-RUN npm install -g serve
-COPY --from=build /app/dist ./dist
+# --- nginx ---
+FROM nginx:1.27-alpine
+WORKDIR /usr/share/nginx/html
+COPY --from=build /app/dist ./
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
-CMD ["serve", "-s", "dist", "-l", "80"]

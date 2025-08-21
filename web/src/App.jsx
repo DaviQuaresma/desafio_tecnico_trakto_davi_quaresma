@@ -139,16 +139,30 @@ export default function App() {
     setProgress(0);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
+      const presign = await api.post("/api/videos/presign", {
+        filename: file.name,
+        contentType: file.type || "video/mp4",
+      });
+      const { id, uploadUrl } = presign.data;
 
-      const res = await api.post("/api/videos", formData, {
-        headers: { "Content-Type": "multipart/form-data" },
+      await axios.put(uploadUrl, file, {
+        headers: { "Content-Type": file.type || "video/mp4" },
         onUploadProgress: (ev) => {
           const total = ev.total ?? file.size ?? 1;
           const pct = Math.round((ev.loaded * 100) / total);
           setProgress(pct);
         },
+      });
+
+      await fetch(uploadUrl, {
+        method: "PUT",
+        headers: { "Content-Type": file.type || "video/mp4" },
+        body: file,
+      });
+
+      const res = await api.post("/api/videos/complete", {
+        id,
+        size: file.size,
       });
 
       setItems((prev) => [res.data, ...prev]);
@@ -157,7 +171,7 @@ export default function App() {
       setProgress(0);
     } catch (e) {
       console.error(e);
-      setError("Falha no upload.");
+      setError("Falha no upload via URL pré-assinada.");
     }
   }
 
