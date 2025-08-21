@@ -8,12 +8,9 @@
 "scripts": {
     "gcp:init:sh": "bash scripts/gcp-init.sh",
     "gcp:init:ps": "powershell -ExecutionPolicy Bypass -File scripts/gcp-init.ps1",
-
     "gcs:cors:set": "gcloud storage buckets update gs://trakto-videos-469221 --cors-file=scripts/cors.json",
-
-    "gcs:smoke:cp": "echo teste> test.txt && gcloud storage cp test.txt gs://trakto-videos-469221/tests/test.txt",
+    "gcs:smoke:cp": "echo test > test.txt && gcloud storage cp test.txt gs://trakto-videos-469221/tests/test.txt",
     "gcs:smoke:ls": "gcloud storage ls gs://trakto-videos-469221/tests/",
-
     "gcs:upload": "node gcs.mjs upload ./test.txt tests/test.txt",
     "gcs:url": "node gcs.mjs url tests/test.txt",
 

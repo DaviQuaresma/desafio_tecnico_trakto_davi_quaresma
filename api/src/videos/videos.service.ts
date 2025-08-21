@@ -41,12 +41,17 @@ export class VideosService {
     this.signedTtlSec = Number(cfg.get('GCS_SIGNED_URL_EXPIRES') ?? 3600);
   }
 
-  list(page = 1, pageSize = 10) {
+  async list(page = 1, pageSize = 10) {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
-    // reemite URLs assinadas “frescas”
-    const items = this.records.slice().reverse().slice(start, end);
-    return { page, pageSize, total: this.records.length, items };
+
+    // pega do mais novo pro mais antigo
+    const slice = this.records.slice().reverse().slice(start, end);
+
+    // 🔥 reemite URLs assinadas “frescas” para cada item visível
+    await Promise.all(slice.map((r) => this.refreshSignedUrls(r)));
+
+    return { page, pageSize, total: this.records.length, items: slice };
   }
 
   async refreshSignedUrls(rec: VideoRecord) {
@@ -58,9 +63,10 @@ export class VideosService {
       : null;
   }
 
-  getOne(id: string) {
+  async getOne(id: string) {
     const rec = this.records.find((r) => r.id === id);
     if (!rec) throw new NotFoundException('Video not found');
+    await this.refreshSignedUrls(rec); // 🔥 garante link fresco no detalhe também
     return rec;
   }
 
@@ -106,6 +112,14 @@ export class VideosService {
 
     await this.refreshSignedUrls(rec);
     return rec;
+  }
+
+  getObjectMetadata(objectKey: string) {
+    return this.gcs.getMetadata(objectKey);
+  }
+
+  openReadStream(objectKey: string) {
+    return this.gcs.getReadStream(objectKey);
   }
 
   // ========= FLUXO B (OFICIAL): URL pré-assinada + confirmação =========
