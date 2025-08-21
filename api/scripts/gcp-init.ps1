@@ -8,7 +8,7 @@ $BUCKET     = "trakto-videos-469221"
 $SA_NAME    = "trakto-videos-uploader"
 $SA_EMAIL   = "$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com"
 $KEY_PATH   = "C:\keys\trakto-uploader.json"
-$CORS_FILE  = "scripts\cors.json"
+$CORS_FILE  = "../cors.json"
 # ====================
 
 Write-Host ">> set project"
