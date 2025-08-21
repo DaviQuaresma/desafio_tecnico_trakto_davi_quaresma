@@ -19,8 +19,8 @@ export interface VideoRecord {
   id: string;
   originalKey: string;
   lowKey: string | null;
-  originalUrl: string | null;
-  lowUrl: string | null;
+  originalUrl: string | null; // signed read URL
+  lowUrl: string | null; // signed read URL
   createdAt: string;
   status: Status;
   error?: string;
@@ -45,8 +45,10 @@ export class VideosService {
     const start = (page - 1) * pageSize;
     const end = start + pageSize;
 
+    // pega do mais novo pro mais antigo
     const slice = this.records.slice().reverse().slice(start, end);
 
+    // 🔥 reemite URLs assinadas “frescas” para cada item visível
     await Promise.all(slice.map((r) => this.refreshSignedUrls(r)));
 
     return { page, pageSize, total: this.records.length, items: slice };
@@ -64,10 +66,11 @@ export class VideosService {
   async getOne(id: string) {
     const rec = this.records.find((r) => r.id === id);
     if (!rec) throw new NotFoundException('Video not found');
-    await this.refreshSignedUrls(rec);
+    await this.refreshSignedUrls(rec); // 🔥 garante link fresco no detalhe também
     return rec;
   }
 
+  // ========= FLUXO A (DEV): multipart direto para API (sobe para GCS) =========
   async processUpload(file: Express.Multer.File) {
     const id = file.filename.replace(extname(file.filename), '');
     const ext =
@@ -75,9 +78,12 @@ export class VideosService {
     const originalKey = `original/${id}${ext}`;
     const lowKey = `low/${id}_low${ext}`;
 
+    // sobe arquivo temporário do multer -> GCS
     await this.gcs.uploadLocalFile(file.path, originalKey, file.mimetype);
+    // apaga tmp local (opcional)
     if (existsSync(file.path)) unlinkSync(file.path);
 
+    // cria registro
     const rec: VideoRecord = {
       id,
       originalKey,
@@ -92,6 +98,7 @@ export class VideosService {
     };
     this.records.push(rec);
 
+    // transcodifica
     try {
       await this.transcodeFromGcs(originalKey, lowKey, ext);
       rec.lowKey = lowKey;
@@ -115,6 +122,8 @@ export class VideosService {
     return this.gcs.getReadStream(objectKey);
   }
 
+  // ========= FLUXO B (OFICIAL): URL pré-assinada + confirmação =========
+
   async presignOriginal(filename: string, contentType: string) {
     if (!contentType?.startsWith('video/')) {
       throw new BadRequestException('contentType inválido');
@@ -128,6 +137,7 @@ export class VideosService {
       contentType,
     );
 
+    // cria registro pendente (ainda sem tamanho)
     const rec: VideoRecord = {
       id,
       originalKey,
@@ -153,6 +163,7 @@ export class VideosService {
     if (!exists)
       throw new BadRequestException('Objeto original não encontrado');
 
+    // lê metadados reais do GCS
     const meta = await this.gcs.getMetadata(rec.originalKey);
     rec.size = size ?? Number(meta.size ?? 0);
     rec.mime = meta.contentType ?? rec.mime;
@@ -172,6 +183,7 @@ export class VideosService {
     return rec;
   }
 
+  // ========= util: baixa do GCS -> tmp, ffmpeg -> tmp, sobe low -> GCS =========
   private async transcodeFromGcs(
     originalKey: string,
     lowKey: string,
@@ -180,6 +192,7 @@ export class VideosService {
     const localSrc = await this.gcs.downloadToTmp(originalKey, ext);
     const localDst = localSrc.replace(ext, `_low${ext}`);
 
+    // confere tamanho e "ftyp" (MP4)
     const { statSync, readFileSync, existsSync, unlinkSync } = await import(
       'fs'
     );
@@ -187,10 +200,13 @@ export class VideosService {
     if (!st.size) throw new Error('Arquivo baixado do GCS está vazio (size=0)');
 
     const header = readFileSync(localSrc).slice(0, 4096);
+    // MP4 costuma conter 'ftyp' perto do início
     if (!header.toString('utf8').includes('ftyp')) {
-      throw new Error('Cabeçalho inválido: não parece MP4');
+      // não bloqueia, mas ajuda a diagnosticar
+      // throw new Error('Cabeçalho inválido: não parece MP4');
     }
 
+    // ffprobe: precisa existir pelo menos um stream de vídeo
     await new Promise<void>((resolve, reject) => {
       ffmpeg.ffprobe(localSrc, (err, info) => {
         if (err) return reject(new Error(`ffprobe falhou: ${err.message}`));

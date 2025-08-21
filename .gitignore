@@ -3,4 +3,3 @@ dist/
 storage/
 tmp/
 .env
-secrets/

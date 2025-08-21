@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* fundo com vibe Trakto */
 body {
   background: radial-gradient(
       1200px 600px at 70% -10%,
@@ -16,6 +17,7 @@ body {
     linear-gradient(180deg, #0b1220, #0b1220 60%, #0a0f1a);
 }
 
+/* componentes utilitários */
 @layer components {
   .card {
     @apply rounded-2xl bg-white/5 border border-white/10 shadow-glass;
