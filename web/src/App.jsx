@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api/client";
+import { api, makeFileUrl } from "./api/client";
 import "./index.css";
-import axios from "axios";
 
 const humanBytes = (n = 0) => {
   const u = ["B", "KB", "MB", "GB", "TB"];
@@ -52,51 +51,6 @@ export default function App() {
     }
   }
 
-  const [dl, setDl] = useState({});
-
-  async function handleDownload(v, type /* 'original' | 'low' */) {
-    const key = `${v.id}:${type}`;
-    setDl((s) => ({ ...s, [key]: 0 }));
-    try {
-      const url = `/api/videos/${v.id}/download/${type}`;
-      const res = await axios.get(url, {
-        responseType: "blob",
-        onDownloadProgress: (ev) => {
-          if (ev.total) {
-            const pct = Math.round((ev.loaded * 100) / ev.total);
-            setDl((s) => ({ ...s, [key]: pct }));
-          }
-        },
-      });
-
-      const disp = res.headers["content-disposition"] || "";
-      const m = /filename\*?=(?:UTF-8'')?"?([^\";]+)/i.exec(disp);
-      const filename = m ? decodeURIComponent(m[1]) : `${v.id}_${type}.mp4`;
-
-      const blob = new Blob([res.data], {
-        type: res.headers["content-type"] || "application/octet-stream",
-      });
-      const objUrl = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = objUrl;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(objUrl);
-    } finally {
-      setTimeout(
-        () =>
-          setDl((s) => {
-            const n = { ...s };
-            delete n[key];
-            return n;
-          }),
-        1000
-      );
-    }
-  }
-
   useEffect(() => {
     load();
   }, [page, pageSize]);
@@ -144,15 +98,6 @@ export default function App() {
         contentType: file.type || "video/mp4",
       });
       const { id, uploadUrl } = presign.data;
-
-      await axios.put(uploadUrl, file, {
-        headers: { "Content-Type": file.type || "video/mp4" },
-        onUploadProgress: (ev) => {
-          const total = ev.total ?? file.size ?? 1;
-          const pct = Math.round((ev.loaded * 100) / total);
-          setProgress(pct);
-        },
-      });
 
       await fetch(uploadUrl, {
         method: "PUT",
@@ -381,52 +326,28 @@ export default function App() {
                       <td className="py-3 pr-4">{humanBytes(v.size)}</td>
                       <td className="py-3 pr-4">
                         {v.originalUrl ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleDownload(v, "original")}
-                              className="text-brand-300 hover:text-brand-200 underline underline-offset-4 disabled:opacity-40"
-                              disabled={dl[`${v.id}:original`] >= 0}
-                            >
-                              Baixar
-                            </button>
-                            {dl[`${v.id}:original`] >= 0 && (
-                              <div className="mt-1 h-1 w-24 rounded bg-white/10">
-                                <div
-                                  className="h-1 rounded bg-brand-500"
-                                  style={{
-                                    width: `${dl[`${v.id}:original`] || 0}%`,
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </>
+                          <a
+                            className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
+                            href={makeFileUrl(v.originalUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Baixar
+                          </a>
                         ) : (
                           <span className="text-slate-500">—</span>
                         )}
                       </td>
                       <td className="py-3 pr-0">
                         {v.lowUrl ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleDownload(v, "low")}
-                              className="text-brand-300 hover:text-brand-200 underline underline-offset-4 disabled:opacity-40"
-                              disabled={dl[`${v.id}:low`] >= 0}
-                            >
-                              Baixar
-                            </button>
-                            {dl[`${v.id}:low`] >= 0 && (
-                              <div className="mt-1 h-1 w-24 rounded bg-white/10">
-                                <div
-                                  className="h-1 rounded bg-brand-500"
-                                  style={{
-                                    width: `${dl[`${v.id}:low`] || 0}%`,
-                                  }}
-                                />
-                              </div>
-                            )}
-                          </>
+                          <a
+                            className="text-brand-300 hover:text-brand-200 underline underline-offset-4"
+                            href={makeFileUrl(v.lowUrl)}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Baixar
+                          </a>
                         ) : (
                           <span className="text-slate-500">—</span>
                         )}

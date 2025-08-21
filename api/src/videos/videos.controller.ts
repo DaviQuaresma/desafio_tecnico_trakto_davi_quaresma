@@ -10,33 +10,25 @@ import {
   ParseFilePipe,
   MaxFileSizeValidator,
   BadRequestException,
-  Res,
-  NotFoundException,
 } from '@nestjs/common';
 import { VideosService } from './videos.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
-import { basename, extname } from 'path';
+import { extname } from 'path';
 import { randomUUID } from 'crypto';
 import { mkdirSync } from 'fs';
-import type { Response } from 'express';
 
 @Controller('/videos')
 export class VideosController {
   constructor(private readonly videos: VideosService) {}
 
   @Get()
-  async list(
-    @Query('page') page = '1',
-    @Query('pageSize') pageSize = '10',
-    @Res({ passthrough: true }) res: Response,
-  ) {
-    res.setHeader('Cache-Control', 'no-store');
+  async list(@Query('page') page = '1', @Query('pageSize') pageSize = '10') {
     return this.videos.list(+page, +pageSize);
   }
 
   @Get(':id')
-  async getOne(@Param('id') id: string) {
+  getOne(@Param('id') id: string) {
     return this.videos.getOne(id);
   }
 
@@ -90,50 +82,5 @@ export class VideosController {
       );
     }
     return this.videos.processUpload(file);
-  }
-
-  @Get(':id/download/original')
-  async downloadOriginal(@Param('id') id: string, @Res() res: Response) {
-    return this.downloadInternal(id, 'original', res);
-  }
-
-  @Get(':id/download/low')
-  async downloadLow(@Param('id') id: string, @Res() res: Response) {
-    return this.downloadInternal(id, 'low', res);
-  }
-
-  private async downloadInternal(
-    id: string,
-    which: 'original' | 'low',
-    res: Response,
-  ) {
-    const rec = await this.videos.getOne(id);
-    const key = which === 'low' ? rec.lowKey : rec.originalKey;
-    if (!key) throw new NotFoundException('Arquivo não disponível');
-
-    const meta = await this.videos.getObjectMetadata(key);
-    const stream = this.videos.openReadStream(key);
-
-    const ct = meta?.contentType || 'application/octet-stream';
-    const size = Number(meta?.size || 0);
-
-    const base = (rec.originalFilename || basename(key)).replace(
-      /\.[^.]+$/,
-      '',
-    );
-    const ext = extname(key) || '.mp4';
-    const name = which === 'low' ? `${base}_low${ext}` : `${base}${ext}`;
-
-    res.setHeader('Content-Type', ct);
-    if (size) res.setHeader('Content-Length', String(size)); // necessário p/ progresso
-    res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
-    // (opcional) não cachear
-    res.setHeader('Cache-Control', 'no-store');
-
-    stream.on('error', () => {
-      if (!res.headersSent) res.status(500).end('stream error');
-      else res.end();
-    });
-    stream.pipe(res);
   }
 }
