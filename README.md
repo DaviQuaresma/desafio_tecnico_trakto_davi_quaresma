@@ -37,7 +37,7 @@ Pensada para rodar **localmente** e **via Docker**.
    │
    │ UI (upload) → solicita URL pré-assinada (PUT)
    ▼
-[Web (Nginx) :8080]  ── proxy /api → API:3000
+[Web:8080]  ── proxy /api → API:3000
    │
    ├─ POST /api/videos/presign      → { id, uploadUrl }
    ├─ PUT uploadUrl (GCS direto)    → CORS do bucket
@@ -167,7 +167,47 @@ Config (`web/src/api/client.ts`):
 
 ### Bucket, Service Account e permissões
 
-> Requer `gcloud` autenticado.
+### Configuração automatizada (recomendado)
+
+> **Recomendado para times e para facilitar a renovação das credenciais.**
+
+1. **Pré-requisitos:**  
+   - [Google Cloud CLI (gcloud)](https://cloud.google.com/sdk/docs/install) instalada.
+   - Permissão de Owner ou Editor no projeto GCP.
+
+2. **Autentique-se no Google Cloud:**
+   ```powershell
+   gcloud auth login
+   ```
+
+3. **Execute o script de setup:**
+   ```powershell
+   # No PowerShell, na raiz do projeto:
+   cd api
+   powershell -ExecutionPolicy Bypass -File .\scripts\gcp-init.ps1
+   ```
+   O script irá:
+   - Garantir que o bucket existe.
+   - Garantir que a Service Account existe e tem permissão.
+   - Gerar uma nova chave JSON em `C:\keys\trakto-uploader.json`.
+   - Configurar CORS no bucket.
+   - Exibir as variáveis para adicionar ao seu `.env`.
+
+4. **Atualize o arquivo `.env` da API:**
+   ```
+   GOOGLE_APPLICATION_CREDENTIALS=C:\keys\trakto-uploader.json
+   GCS_BUCKET=trakto-videos-469221
+   GCS_SIGNED_URL_EXPIRES=3600
+   ```
+
+5. **Renovação das credenciais:**  
+   Sempre que necessário (ex: chave expirada), basta rodar novamente o script.
+
+---
+
+### Bucket, Service Account e permissões (manual)
+
+> **Use apenas se não quiser rodar o script automatizado.**
 
 ```bash
 # Variáveis
@@ -202,13 +242,11 @@ Copie a chave para **`./secrets/gcp_sa.json`** (garanta que é **arquivo**, não
 
 ### CORS do bucket
 
-Para o front no Docker (`http://localhost:8080`):
-
 `api/scripts/cors.json`
 ```json
 [
   {
-    "origin": ["http://localhost:8080"],
+    "origin": ["*"],
     "method": ["GET", "PUT", "HEAD"],
     "responseHeader": ["Content-Type", "x-goog-resumable", "x-goog-meta-*"],
     "maxAgeSeconds": 3600

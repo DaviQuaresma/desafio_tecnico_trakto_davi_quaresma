@@ -1,23 +1,29 @@
 services:
   api:
-    build: ./api
+    build:
+      context: ./api
+    image: trakto-api
+    container_name: trakto-api
     environment:
-      NODE_ENV: production
-      PORT: 3000
-      GCS_BUCKET: trakto-videos-469221
-      GOOGLE_APPLICATION_CREDENTIALS: /run/secrets/gcp_sa.json
-      GCS_SIGNED_URL_EXPIRES: 3600
-    volumes:
-      - ./secrets:/run/secrets:ro
-    expose:
-      - "3000"
-    # opcional para debugar diretamente
+      - NODE_ENV=production
+      - PORT=3000
+      # Tem que colocar o seu bucket no lugar do meu para funcionar
+      - GCS_BUCKET=trakto-videos-469221
+      - GOOGLE_APPLICATION_CREDENTIALS=/run/secrets/gcp_sa.json
+      - GCS_SIGNED_URL_EXPIRES=${GCS_SIGNED_URL_EXPIRES:-3600}
     ports:
       - "3000:3000"
+    volumes:
+      - ./secrets/gcp_sa.json:/run/secrets/gcp_sa.json:ro
 
   web:
-    build: ./web
+    build:
+      context: ./web
+    image: trakto-web
+    container_name: trakto-web
+    ports:
+      - "5173:5173"
+    environment:
+      - NODE_ENV=development
     depends_on:
       - api
-    ports:
-      - "8080:80"

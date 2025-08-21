@@ -11,6 +11,15 @@ $KEY_PATH   = "C:\keys\trakto-uploader.json"
 $CORS_FILE  = "../cors.json"
 # ====================
 
+# Verifica se está autenticado no gcloud
+try {
+    gcloud auth list --filter=status:ACTIVE --format="value(account)" | Out-Null
+} catch {
+    Write-Host "Você não está autenticado no Google Cloud CLI."
+    Write-Host "Execute: gcloud auth login"
+    exit 1
+}
+
 Write-Host ">> set project"
 gcloud config set project $PROJECT_ID | Out-Null
 
@@ -45,12 +54,9 @@ Write-Host ">> ensure key dir"
 $dir = Split-Path -Parent $KEY_PATH
 if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 
-Write-Host ">> ensure key file"
-if (-not (Test-Path $KEY_PATH)) {
-  gcloud iam service-accounts keys create $KEY_PATH --iam-account=$SA_EMAIL
-} else {
-  Write-Host "   chave já existe em $KEY_PATH"
-}
+Write-Host ">> gerar nova chave da service account"
+if (Test-Path $KEY_PATH) { Remove-Item $KEY_PATH }
+gcloud iam service-accounts keys create $KEY_PATH --iam-account=$SA_EMAIL
 
 Write-Host ">> set CORS no bucket (PUT do browser)"
 if (Test-Path $CORS_FILE) {
@@ -59,7 +65,7 @@ if (Test-Path $CORS_FILE) {
 @"
 [
   {
-    "origin": ["http://localhost:5173"],
+    "origin": ["*"],
     "method": ["GET", "PUT", "HEAD"],
     "responseHeader": ["Content-Type", "x-goog-resumable", "x-goog-meta-*"],
     "maxAgeSeconds": 3600
