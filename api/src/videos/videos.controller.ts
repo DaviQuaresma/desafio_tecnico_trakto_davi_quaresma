@@ -17,7 +17,7 @@ import { VideosService } from './videos.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { diskStorage } from 'multer';
 import { basename, extname } from 'path';
-import { randomInt, randomUUID } from 'crypto';
+import { randomUUID } from 'crypto';
 import { mkdirSync } from 'fs';
 import type { Response } from 'express';
 
@@ -58,15 +58,34 @@ export class VideosController {
   @UseInterceptors(
     FileInterceptor('file', {
       storage: diskStorage({
-        destination: './tmp',
-        filename: (_req, file, cb) =>
-          cb(null, `${randomInt(1000, 9999)}-${file.originalname}`),
+        destination: (_req, _file, cb) => {
+          const dest = 'tmp/uploads';
+          mkdirSync(dest, { recursive: true });
+          cb(null, dest);
+        },
+        filename: (_req, file, cb) => {
+          const id = randomUUID();
+          const ext = extname(file.originalname).toLowerCase();
+          cb(null, `${id}${ext}`);
+        },
       }),
     }),
   )
-  async upload(@UploadedFile() file: Express.Multer.File) {
-    const video = await this.videos.uploadAndRegister(file);
-    return video;
+  async upload(
+    @UploadedFile(
+      new ParseFilePipe({
+        validators: [new MaxFileSizeValidator({ maxSize: 200 * 1024 * 1024 })],
+        fileIsRequired: true,
+      }),
+    )
+    file: Express.Multer.File,
+  ) {
+    if (!file?.mimetype?.startsWith('video/')) {
+      throw new BadRequestException(
+        `Arquivo inválido (${file?.mimetype ?? 'desconhecido'}). Envie um vídeo.`,
+      );
+    }
+    return this.videos.processUpload(file);
   }
 
   @Get(':id/download/original')
