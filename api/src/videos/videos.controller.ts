@@ -40,8 +40,6 @@ export class VideosController {
     return this.videos.getOne(id);
   }
 
-  // ======= FLUXO OFICIAL: URL PRÉ-ASSINADA =======
-
   @Post('presign')
   presign(@Body() body: { filename: string; contentType: string }) {
     if (!body?.filename || !body?.contentType) {
@@ -55,8 +53,6 @@ export class VideosController {
     if (!body?.id) throw new BadRequestException('id é obrigatório');
     return this.videos.completeUpload(body.id, body.size);
   }
-
-  // ======= FLUXO DEV: multipart → API (sobe p/ GCS) =======
 
   @Post()
   @UseInterceptors(
