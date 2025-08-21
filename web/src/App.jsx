@@ -58,7 +58,7 @@ export default function App() {
     const key = `${v.id}:${type}`;
     setDl((s) => ({ ...s, [key]: 0 }));
     try {
-      const url = `/api/videos/${v.id}/download/${type}`;
+      const url = `/api/videos/${encodeURIComponent(v.id)}/download/${type}`;
       const res = await axios.get(url, {
         responseType: "blob",
         onDownloadProgress: (ev) => {
