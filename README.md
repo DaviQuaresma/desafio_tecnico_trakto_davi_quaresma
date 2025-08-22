@@ -35,9 +35,9 @@ Pensada para rodar **localmente** e **via Docker**.
 ```
 [Browser]
    │
-   │ UI (upload) → solicita URL pré-assinada (PUT)
+   │ UI (upload) → envia video para api processa-lo (POST)
    ▼
-[Web:8080]  ── proxy /api → API:3000
+[Web:8080] ── api → API:3000
    │
    ├─ POST /api/videos/presign      → { id, uploadUrl }
    ├─ PUT uploadUrl (GCS direto)    → CORS do bucket
@@ -87,21 +87,23 @@ Pensada para rodar **localmente** e **via Docker**.
 │  │  │  ├─ videos.controller.ts
 │  │  │  ├─ videos.service.ts
 │  │  │  └─ videos.module.ts
-│  │  ├─ storage/gcs.service.ts
+│  │  ├─ storage/
+│  │  │  ├─ gcs.service.ts
+│  │  │  └─ storage.module.ts
 │  │  ├─ app.module.ts
 │  │  └─ main.ts
-│  ├─ scripts/cors.json         # CORS do bucket (dev)
+│  ├─ cors.json                 # CORS do bucket (dev)
+│  ├─ scripts/gcp-init.ps1      # Comando para configuração de bucket e credenciais que devem ser usadas no .env
 │  ├─ Dockerfile
 │  └─ package.json
 ├─ web/                         # React + Vite + Tailwind
 │  ├─ src/
 │  │  ├─ api/client.ts
 │  │  └─ App.tsx
-│  ├─ nginx.conf
 │  ├─ Dockerfile
 │  └─ package.json
-├─ secrets/                     # (ignorada no git)
-│  └─ gcp_sa.json               # chave da service account
+├─ secrets/                     
+│  └─ gcp_sa.json               # (ignorada no git) chave da service account
 ├─ docker-compose.yml
 └─ README.md
 ```
@@ -143,8 +145,8 @@ GCS_SIGNED_URL_EXPIRES=3600
 ### Pipeline de processamento
 
 1. Front chama `POST /presign` → recebe `{ id, uploadUrl }`.
-2. Front faz `PUT uploadUrl` (GCS) — **CORS do bucket** deve permitir a origin do front.
-3. Front chama `POST /complete { id }`.
+2. API faz `PUT uploadUrl` (GCS) — **CORS do bucket** deve permitir a origin do front.
+3. API chama `POST /complete { id }`.
 4. API baixa original (temp), executa **ffmpeg** (mantém proporção, bitrate reduzido) e faz upload do **low** para `low/<id>_low.mp4`.
 5. API atualiza metadados (mock in-memory) e assina URLs de download.
 
