@@ -48,7 +48,7 @@ export default function App() {
         if (prev >= realProgress) return prev;
         return Math.min(prev + 1, realProgress);
       });
-    }, 240); // quanto maior, mais lento (ms)
+    }, 40);
 
     return () => clearInterval(progressInterval.current);
   }, [realProgress, uploading]);
@@ -198,6 +198,15 @@ export default function App() {
       setUploading(false);
     }
   }
+
+  useEffect(() => {
+    const hasPending = items.some((v) => v.status === "pending");
+    if (!hasPending) return;
+    const interval = setInterval(() => {
+      load();
+    }, 1000 * 10);
+    return () => clearInterval(interval);
+  }, [items]);
 
   return (
     <div className="min-h-screen font-display text-slate-100">
@@ -402,6 +411,9 @@ export default function App() {
                           }`}
                         >
                           {v.status}
+                          {v.status === "pending" && (
+                            <span className="ml-2 animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full align-middle" />
+                          )}
                         </span>
                       </td>
                       <td className="py-3 pr-4">{humanBytes(v.size)}</td>

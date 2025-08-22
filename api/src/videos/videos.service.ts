@@ -10,6 +10,8 @@ import ffmpeg from 'fluent-ffmpeg';
 import ffmpegInstaller from '@ffmpeg-installer/ffmpeg';
 import { GcsService } from '../storage/gcs.service';
 import { ConfigService } from '@nestjs/config';
+import { InjectQueue } from '@nestjs/bull';
+import { Queue } from 'bullmq';
 
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 
@@ -47,6 +49,7 @@ export class VideosService {
   constructor(
     private readonly gcs: GcsService,
     cfg: ConfigService,
+    @InjectQueue('videos') private readonly videoQueue: Queue,
   ) {
     this.signedTtlSec = Number(cfg.get('GCS_SIGNED_URL_EXPIRES') ?? 3600);
   }
@@ -106,9 +109,28 @@ export class VideosService {
     };
     this.records.push(rec);
 
+    await this.videoQueue.add('transcode', {
+      id,
+      originalKey,
+      lowKey,
+      ext,
+    });
+
+    await this.refreshSignedUrls(rec);
+    return rec;
+  }
+
+  async handleTranscodeJob(data: {
+    id: string;
+    originalKey: string;
+    lowKey: string;
+    ext: string;
+  }) {
+    const rec = this.records.find((r) => r.id === data.id);
+    if (!rec) return;
     try {
-      await this.transcodeFromGcs(originalKey, lowKey, ext);
-      rec.lowKey = lowKey;
+      await this.transcodeFromGcs(data.originalKey, data.lowKey, data.ext);
+      rec.lowKey = data.lowKey;
       rec.status = 'done';
       await this.refreshSignedUrls(rec);
     } catch (e: any) {
@@ -116,9 +138,6 @@ export class VideosService {
       rec.error = e?.message ?? String(e);
       await this.refreshSignedUrls(rec);
     }
-
-    await this.refreshSignedUrls(rec);
-    return rec;
   }
 
   getObjectMetadata(objectKey: string) {
