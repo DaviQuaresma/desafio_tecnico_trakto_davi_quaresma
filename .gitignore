@@ -3,5 +3,5 @@ dist/
 storage/
 tmp/
 .env
-# secrets/
-gcp_sa.json
+secrets/gcp_sa.json
+
